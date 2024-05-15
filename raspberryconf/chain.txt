@@ -1,0 +1,13 @@
+prima di tutto su rbp
+sudo apt update && sudo apt upgrade -y
+
+
+andare nella directory /home/NOME UTENTE/.local/share/ e creare un file con nano .telegram_tokenBot e incollare al suo interno il token messo su notion
+
+
+sudo apt install python3-pip
+pip install python-telegram-bot==13.7
+
+pip freeze | grep RPi
+pip install RPi.GPIO
+
