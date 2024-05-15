@@ -8,7 +8,6 @@ SIGNAL_PIN = 18
 GPIO.setmode(GPIO.BCM)
 GPIO.setup(SIGNAL_PIN, GPIO.IN)
 
-USER_ID = -4206121589
 
 def userHandler(update, topic):
     topic.bot.send_message(chat_id=update.effective_chat.id, text="CIAO")
@@ -36,7 +35,7 @@ try:
         signal = GPIO.input(SIGNAL_PIN)
         if signal == 1:
             print("Invio messaggio su telegram")
-            bot.send_message(chat_id = USER_ID, text="ATTENZIONE! MOVIMENTO SOSPETTO RILEVATO")
+            bot.send_message(chat_id = "-4206121589", text="ATTENZIONE! MOVIMENTO SOSPETTO RILEVATO")
         time.sleep(1)
 
 except KeyboardInterrupt:
