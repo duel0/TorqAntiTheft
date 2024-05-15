@@ -1,3 +1,4 @@
+![Logo](TORQ.png)
 # Torq Anti-Theft System
 A STM32 Powered Anti Theft System
 
