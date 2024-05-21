@@ -3,47 +3,77 @@ import RPi.GPIO as GPIO
 import serial
 import time
 import datetime
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters
-from telegram import Bot
+from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, ConversationHandler
+from telegram import Bot, Update
+from telegram.ext.callbackcontext import CallbackContext
+
+# Stati per la conversazione di Telegram
+PIN_INPUT, ACTIVATE, DEACTIVATE, SET_PIN = range(4)
 
 # Variabili globali
 ALARM = False
-PIN = "1234"  # Imposta il PIN di sicurezza
+PIN = "1234"  # PIN hardcoded iniziale
+telegram_users_in_conversation = {}
 
 # Funzioni di servizio Telegram
-def systemCheck(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="SYSTEM IS ON")
-    print(update.effective_chat.id)
+def start_pin_input(update: Update, context: CallbackContext):
+    update.message.reply_text("Inserisci il nuovo PIN a 4 cifre:")
+    return SET_PIN
 
-def activateAlarm(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Inserisci il PIN per attivare l'allarme:")
-
-def shutdownAlarm(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Inserisci il PIN per disattivare l'allarme:")
-
-def checkPIN(update, context):
-    global ALARM
-    user_input = update.message.text.split()
-    if len(user_input) == 2 and user_input[0].lower() == "/pin":
-        input_pin = user_input[1]
-        if input_pin == PIN:
-            ALARM = not ALARM
-            state = "attivato" if ALARM else "disattivato"
-            context.bot.send_message(chat_id=update.effective_chat.id, text=f"Allarme {state}!")
-        else:
-            context.bot.send_message(chat_id=update.effective_chat.id, text="PIN errato!")
+def set_new_pin(update: Update, context: CallbackContext):
+    global PIN
+    new_pin = update.message.text.strip()
+    if len(new_pin) == 4 and new_pin.isdigit():
+        PIN = new_pin
+        update.message.reply_text(f"Nuovo PIN impostato correttamente.")
+        return ConversationHandler.END
     else:
-        context.bot.send_message(chat_id=update.effective_chat.id, text="Formato comando errato! Usa /pin <PIN>")
+        update.message.reply_text("PIN non valido. Assicurati che sia a 4 cifre.")
+        return SET_PIN
 
-def HELP(update, context):
-    context.bot.send_message(chat_id=update.effective_chat.id, text='''
+def request_pin(update: Update, context: CallbackContext):
+    update.message.reply_text("Inserisci il PIN:")
+    return PIN_INPUT
+
+def check_pin(update: Update, context: CallbackContext):
+    global ALARM
+    user_input = update.message.text.strip()
+    if user_input == PIN:
+        command = telegram_users_in_conversation[update.effective_chat.id]
+        if command == 'activate':
+            ALARM = True
+            update.message.reply_text("Allarme attivato!")
+        elif command == 'deactivate':
+            ALARM = False
+            update.message.reply_text("Allarme disattivato!")
+        elif command == 'set_pin':
+            return start_pin_input(update, context)
+        return ConversationHandler.END
+    else:
+        update.message.reply_text("PIN errato. Riprova.")
+        return PIN_INPUT
+
+def activate_alarm(update: Update, context: CallbackContext):
+    telegram_users_in_conversation[update.effective_chat.id] = 'activate'
+    return request_pin(update, context)
+
+def shutdown_alarm(update: Update, context: CallbackContext):
+    telegram_users_in_conversation[update.effective_chat.id] = 'deactivate'
+    return request_pin(update, context)
+
+def help_command(update: Update, context: CallbackContext):
+    update.message.reply_text('''
     AVAILABLE COMMANDS:
                             
     /systemcheck
     /activate
     /shutdown
-    /pin <PIN>
+    /setpin
     ''')
+
+def system_check(update: Update, context: CallbackContext):
+    context.bot.send_message(chat_id=update.effective_chat.id, text="SYSTEM IS ON")
+    print(update.effective_chat.id)
 
 # Lettura del token del bot
 with open("/home/torq/.telegram_tokenBot", "r") as BotToken:
@@ -55,12 +85,23 @@ bot = Bot(token=cmteqBot)
 updater = Updater(token=cmteqBot)
 dispatcher = updater.dispatcher
 
-# Registrazione dei comandi
-dispatcher.add_handler(CommandHandler('systemcheck', systemCheck))
-dispatcher.add_handler(CommandHandler('activate', activateAlarm))
-dispatcher.add_handler(CommandHandler('shutdown', shutdownAlarm))
-dispatcher.add_handler(CommandHandler('help', HELP))
-dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, checkPIN))
+# Configurazione delle conversazioni di Telegram
+conv_handler = ConversationHandler(
+    entry_points=[
+        CommandHandler('setpin', start_pin_input),
+        CommandHandler('activate', activate_alarm),
+        CommandHandler('shutdown', shutdown_alarm)
+    ],
+    states={
+        SET_PIN: [MessageHandler(Filters.text & ~Filters.command, set_new_pin)],
+        PIN_INPUT: [MessageHandler(Filters.text & ~Filters.command, check_pin)]
+    },
+    fallbacks=[CommandHandler('cancel', lambda update, context: update.message.reply_text("Operazione annullata."))]
+)
+
+dispatcher.add_handler(conv_handler)
+dispatcher.add_handler(CommandHandler('systemcheck', system_check))
+dispatcher.add_handler(CommandHandler('help', help_command))
 
 # Avvio del bot
 updater.start_polling()
@@ -90,15 +131,31 @@ Detected Suspicious Movement
 
 # Gestione comandi via seriale
 def process_serial_command(command):
-    global ALARM
-    if command.startswith("PIN "):
-        input_pin = command.split()[1]
+    global ALARM, PIN
+    if command == "a":
+        ser.write("Inserisci il PIN per attivare l'allarme:\n".encode("utf-8"))
+        input_pin = ser.readline().decode("utf-8").strip()
         if input_pin == PIN:
-            ALARM = not ALARM
-            state = "attivato" si ALARM else "disattivato"
-            ser.write(f"Allarme {state}!\n".encode("utf-8"))
+            ALARM = True
+            ser.write("Allarme attivato!\n".encode("utf-8"))
         else:
             ser.write("PIN errato!\n".encode("utf-8"))
+    elif command == "s":
+        ser.write("Inserisci il PIN per disattivare l'allarme:\n".encode("utf-8"))
+        input_pin = ser.readline().decode("utf-8").strip()
+        if input_pin == PIN:
+            ALARM = False
+            ser.write("Allarme disattivato!\n".encode("utf-8"))
+        else:
+            ser.write("PIN errato!\n".encode("utf-8"))
+    elif command == "p":
+        ser.write("Inserisci il nuovo PIN a 4 cifre:\n".encode("utf-8"))
+        new_pin = ser.readline().decode("utf-8").strip()
+        if len(new_pin) == 4 and new_pin.isdigit():
+            PIN = new_pin
+            ser.write("Nuovo PIN impostato correttamente.\n".encode("utf-8"))
+        else:
+            ser.write("PIN non valido. Assicurati che sia a 4 cifre.\n".encode("utf-8"))
 
 # Funzione principale
 def main():
